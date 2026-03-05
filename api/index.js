@@ -51,7 +51,6 @@ app.post('/login', async (req, res) => {
         if (!principal || principal.password !== password) {
             return res.status(401).json({ error: "Invalid credentials" });
         }
-        // Return the principal object which contains the _id
         res.status(200).json({ message: "Login success", principal });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -60,11 +59,31 @@ app.post('/login', async (req, res) => {
 
 // --- 2. COORDINATOR ROUTES (Managed by Principal) ---
 
+/**
+ * NEW: Coordinator Login Route
+ * This was missing! Point your Flutter Coordinator Login here.
+ */
+app.post('/coordinator/login', async (req, res) => {
+    await connectToDB();
+    try {
+        const { email, password } = req.body;
+        const coordinator = await Coordinator.findOne({ email });
+        
+        if (!coordinator || coordinator.password !== password) {
+            return res.status(401).json({ error: "Invalid credentials" });
+        }
+        
+        // Return the coordinator object containing _id
+        res.status(200).json({ message: "Coordinator login success", coordinator });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Create a new coordinator LINKED to a Principal
 app.post('/add-coordinator', async (req, res) => {
     await connectToDB();
     try {
-        // We now expect 'createdBy' (the Principal's ID) from the frontend
         const { name, email, dept, password, createdBy } = req.body;
 
         if (!createdBy) {
@@ -79,7 +98,7 @@ app.post('/add-coordinator', async (req, res) => {
             email, 
             dept, 
             password, 
-            createdBy // Save the link to the Principal
+            createdBy 
         });
         
         await newCoord.save();
@@ -94,7 +113,6 @@ app.get('/coordinators/:principalId', async (req, res) => {
     await connectToDB();
     try {
         const { principalId } = req.params;
-        // Filter by the createdBy field
         const list = await Coordinator.find({ createdBy: principalId }).sort({ createdAt: -1 });
         res.json(list);
     } catch (err) {
