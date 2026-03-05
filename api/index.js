@@ -2,7 +2,10 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
+
+// Import both models
 const Principal = require('../models/Principal');
+const Coordinator = require('../models/Coordinator');
 
 dotenv.config();
 const app = express();
@@ -10,6 +13,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Connection caching for Vercel performance
 let isConnected = false;
 const connectToDB = async () => {
     if (isConnected) return;
@@ -22,50 +26,78 @@ const connectToDB = async () => {
     }
 };
 
-// --- REGISTRATION ROUTE ---
+// --- 1. PRINCIPAL ROUTES ---
+
 app.post('/register', async (req, res) => {
     await connectToDB();
     try {
         const { name, email, password, phone, institution } = req.body;
-        
-        const existingUser = await Principal.findOne({ email });
-        if (existingUser) {
-            return res.status(400).json({ error: "Email already registered" });
-        }
+        const exists = await Principal.findOne({ email });
+        if (exists) return res.status(400).json({ error: "Principal already exists" });
 
-        const newPrincipal = new Principal({ 
-            name, 
-            email, 
-            password, 
-            phone, 
-            institution 
-        });
-
+        const newPrincipal = new Principal({ name, email, password, phone, institution });
         await newPrincipal.save();
-        res.status(201).json({ message: "Registration successful!" });
+        res.status(201).json({ message: "Principal registered successfully" });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-// --- LOGIN ROUTE ---
 app.post('/login', async (req, res) => {
     await connectToDB();
     try {
         const { email, password } = req.body;
         const principal = await Principal.findOne({ email });
-
         if (!principal || principal.password !== password) {
-            return res.status(401).json({ error: "Invalid email or password" });
+            return res.status(401).json({ error: "Invalid credentials" });
         }
-
-        res.status(200).json({ 
-            message: "Login successful", 
-            principal: { name: principal.name, email: principal.email } 
-        });
+        res.status(200).json({ message: "Login success", principal });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
+
+// --- 2. COORDINATOR ROUTES (Managed by Principal) ---
+
+// Create a new coordinator
+app.post('/add-coordinator', async (req, res) => {
+    await connectToDB();
+    try {
+        const { name, email, dept, password } = req.body;
+        const exists = await Coordinator.findOne({ email });
+        if (exists) return res.status(400).json({ error: "Coordinator already exists" });
+
+        const newCoord = new Coordinator({ name, email, dept, password });
+        await newCoord.save();
+        res.status(201).json(newCoord);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Fetch all coordinators for the list view
+app.get('/coordinators', async (req, res) => {
+    await connectToDB();
+    try {
+        const list = await Coordinator.find().sort({ createdAt: -1 });
+        res.json(list);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Delete a coordinator
+app.delete('/coordinator/:id', async (req, res) => {
+    await connectToDB();
+    try {
+        await Coordinator.findByIdAndDelete(req.params.id);
+        res.json({ message: "Coordinator deleted" });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Health check route
+app.get('/', (req, res) => res.send("Placemate Unified API is Live!"));
 
 module.exports = app;
