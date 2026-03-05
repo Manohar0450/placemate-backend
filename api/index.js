@@ -64,7 +64,6 @@ app.post('/coordinator/login', async (req, res) => {
     try {
         const { email, password } = req.body;
         const coordinator = await Coordinator.findOne({ email });
-        
         if (!coordinator || coordinator.password !== password) {
             return res.status(401).json({ error: "Invalid credentials" });
         }
@@ -101,56 +100,62 @@ app.get('/coordinators/:principalId', async (req, res) => {
     }
 });
 
-app.delete('/coordinator/:id', async (req, res) => {
-    await connectToDB();
-    try {
-        await Coordinator.findByIdAndDelete(req.params.id);
-        res.json({ message: "Coordinator deleted" });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
+// --- 3. PLACEMENT ROUTES ---
 
-// --- 3. PLACEMENT ROUTES (NEW) ---
-
-// Save a new placement
 app.post('/add-placement', async (req, res) => {
     await connectToDB();
     try {
         const { company, role, lpa, stage, createdBy } = req.body;
+        if (!createdBy) return res.status(400).json({ error: "Coordinator ID required" });
 
-        if (!createdBy) {
-            return res.status(400).json({ error: "Coordinator ID (createdBy) is required" });
-        }
-
-        const newPlacement = {
-            company,
-            role,
-            lpa,
-            stage,
-            createdBy, // Coordinator ID
-            createdAt: new Date()
-        };
-
-        // Saving to 'placements' collection directly
-        const result = await mongoose.connection.collection('placements').insertOne(newPlacement);
-        
-        res.status(201).json({ 
-            message: "Placement added successfully", 
-            placementId: result.insertedId 
-        });
+        const newPlacement = { company, role, lpa, stage, createdBy, createdAt: new Date() };
+        await mongoose.connection.collection('placements').insertOne(newPlacement);
+        res.status(201).json({ message: "Placement added successfully" });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-// Get all placements (sorted by newest)
 app.get('/all-placements', async (req, res) => {
     await connectToDB();
     try {
-        const list = await mongoose.connection.collection('placements')
-            .find()
-            .sort({ createdAt: -1 })
+        const list = await mongoose.connection.collection('placements').find().sort({ createdAt: -1 }).toArray();
+        res.json(list);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// --- 4. STUDENT ROUTES (NEWLY UPDATED) ---
+
+// Create Student Account (Coordinator Action)
+app.post('/add-student', async (req, res) => {
+    await connectToDB();
+    try {
+        const { name, dept, rollId, risk, password, createdBy } = req.body;
+        if (!createdBy) return res.status(400).json({ error: "Coordinator ID required" });
+
+        const exists = await mongoose.connection.collection('students').findOne({ rollId });
+        if (exists) return res.status(400).json({ error: "Student ID already exists" });
+
+        const newStudent = { 
+            name, dept, rollId, risk, password, createdBy, 
+            createdAt: new Date() 
+        };
+        await mongoose.connection.collection('students').insertOne(newStudent);
+        res.status(201).json({ message: "Student account created" });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Fetch Students by Coordinator ID
+app.get('/students/:coordinatorId', async (req, res) => {
+    await connectToDB();
+    try {
+        const list = await mongoose.connection.collection('students')
+            .find({ createdBy: req.params.coordinatorId })
+            .sort({ name: 1 })
             .toArray();
         res.json(list);
     } catch (err) {
@@ -158,7 +163,39 @@ app.get('/all-placements', async (req, res) => {
     }
 });
 
-// --- 4. BASE ROUTES ---
+// Update Risk Level
+app.patch('/student/risk', async (req, res) => {
+    await connectToDB();
+    try {
+        const { rollId, newRisk } = req.body;
+        const result = await mongoose.connection.collection('students').updateOne(
+            { rollId: rollId },
+            { $set: { risk: newRisk } }
+        );
+        if (result.matchedCount === 0) return res.status(404).json({ error: "Student not found" });
+        res.json({ message: "Risk level updated" });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Student Login Route
+app.post('/student/login', async (req, res) => {
+    await connectToDB();
+    try {
+        const { rollId, password } = req.body;
+        const student = await mongoose.connection.collection('students').findOne({ rollId });
+        
+        if (!student || student.password !== password) {
+            return res.status(401).json({ error: "Invalid ID or Password" });
+        }
+        res.status(200).json({ message: "Student login success", student });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// --- 5. BASE ROUTES ---
 
 app.get('/', (req, res) => res.send("Placemate Unified API is Live!"));
 
