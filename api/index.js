@@ -7,17 +7,12 @@ const Principal = require('../models/Principal');
 dotenv.config();
 const app = express();
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 
-// MongoDB Connection Logic for Serverless
-// We use a variable to cache the connection so Vercel doesn't reconnect on every click
 let isConnected = false;
-
 const connectToDB = async () => {
     if (isConnected) return;
-
     try {
         await mongoose.connect(process.env.MONGO_URI);
         isConnected = true;
@@ -27,36 +22,50 @@ const connectToDB = async () => {
     }
 };
 
-// --- THE REGISTRATION ROUTE ---
+// --- REGISTRATION ROUTE ---
 app.post('/register', async (req, res) => {
-    await connectToDB(); // Ensure DB is connected before processing
+    await connectToDB();
     try {
-        const { email, password } = req.body;
+        const { name, email, password, phone, institution } = req.body;
         
-        // Check if user already exists
         const existingUser = await Principal.findOne({ email });
         if (existingUser) {
-            return res.status(400).json({ error: "Principal already exists" });
+            return res.status(400).json({ error: "Email already registered" });
         }
 
-        const newPrincipal = new Principal({ email, password });
+        const newPrincipal = new Principal({ 
+            name, 
+            email, 
+            password, 
+            phone, 
+            institution 
+        });
+
         await newPrincipal.save();
-        res.status(201).json({ message: "Principal registered successfully!" });
+        res.status(201).json({ message: "Registration successful!" });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-// Root route for testing if deployment is live
-app.get('/', (req, res) => {
-    res.send("Placemate Backend is running on Vercel!");
-});
+// --- LOGIN ROUTE ---
+app.post('/login', async (req, res) => {
+    await connectToDB();
+    try {
+        const { email, password } = req.body;
+        const principal = await Principal.findOne({ email });
 
-// IMPORTANT FOR VERCEL: 
-// Local development uses app.listen, but Vercel uses module.exports
-if (process.env.NODE_ENV !== 'production') {
-    const PORT = process.env.PORT || 5000;
-    app.listen(PORT, () => console.log(`🚀 Local Server running on port ${PORT}`));
-}
+        if (!principal || principal.password !== password) {
+            return res.status(401).json({ error: "Invalid email or password" });
+        }
+
+        res.status(200).json({ 
+            message: "Login successful", 
+            principal: { name: principal.name, email: principal.email } 
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
 
 module.exports = app;
