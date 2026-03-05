@@ -100,6 +100,16 @@ app.get('/coordinators/:principalId', async (req, res) => {
     }
 });
 
+app.delete('/coordinator/:id', async (req, res) => {
+    await connectToDB();
+    try {
+        await Coordinator.findByIdAndDelete(req.params.id);
+        res.json({ message: "Coordinator deleted" });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // --- 3. PLACEMENT ROUTES ---
 
 app.post('/add-placement', async (req, res) => {
@@ -126,24 +136,34 @@ app.get('/all-placements', async (req, res) => {
     }
 });
 
-// --- 4. STUDENT ROUTES (NEWLY UPDATED) ---
+// --- 4. STUDENT ROUTES ---
 
-// Create Student Account (Coordinator Action)
+// Create Student Account
 app.post('/add-student', async (req, res) => {
     await connectToDB();
     try {
-        const { name, dept, rollId, risk, password, createdBy } = req.body;
+        const { name, email, dept, rollId, risk, password, createdBy } = req.body;
         if (!createdBy) return res.status(400).json({ error: "Coordinator ID required" });
 
-        const exists = await mongoose.connection.collection('students').findOne({ rollId });
-        if (exists) return res.status(400).json({ error: "Student ID already exists" });
+        const idExists = await mongoose.connection.collection('students').findOne({ rollId });
+        if (idExists) return res.status(400).json({ error: "Student Roll ID already exists" });
 
-        const newStudent = { 
-            name, dept, rollId, risk, password, createdBy, 
-            createdAt: new Date() 
+        const emailExists = await mongoose.connection.collection('students').findOne({ email });
+        if (emailExists) return res.status(400).json({ error: "Email already registered" });
+
+        const newStudent = {
+            name,
+            email,
+            dept,
+            rollId,
+            risk,
+            password,
+            createdBy, 
+            createdAt: new Date()
         };
+
         await mongoose.connection.collection('students').insertOne(newStudent);
-        res.status(201).json({ message: "Student account created" });
+        res.status(201).json({ message: "Student registered successfully" });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -179,7 +199,19 @@ app.patch('/student/risk', async (req, res) => {
     }
 });
 
-// Student Login Route
+// Delete Student Record
+app.delete('/student/:rollId', async (req, res) => {
+    await connectToDB();
+    try {
+        const result = await mongoose.connection.collection('students').deleteOne({ rollId: req.params.rollId });
+        if (result.deletedCount === 0) return res.status(404).json({ error: "Student not found" });
+        res.json({ message: "Student record deleted successfully" });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Student Login
 app.post('/student/login', async (req, res) => {
     await connectToDB();
     try {
@@ -197,6 +229,6 @@ app.post('/student/login', async (req, res) => {
 
 // --- 5. BASE ROUTES ---
 
-app.get('/', (req, res) => res.send("Placemate Unified API is Live!"));
+app.get('/', (req, res) => res.send("Placemate Unified API is Live!ehich is created by Manohar Nallamsetty"));
 
 module.exports = app;
