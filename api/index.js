@@ -51,6 +51,7 @@ app.post('/login', async (req, res) => {
         if (!principal || principal.password !== password) {
             return res.status(401).json({ error: "Invalid credentials" });
         }
+        // Return the principal object which contains the _id
         res.status(200).json({ message: "Login success", principal });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -59,15 +60,28 @@ app.post('/login', async (req, res) => {
 
 // --- 2. COORDINATOR ROUTES (Managed by Principal) ---
 
-// Create a new coordinator
+// Create a new coordinator LINKED to a Principal
 app.post('/add-coordinator', async (req, res) => {
     await connectToDB();
     try {
-        const { name, email, dept, password } = req.body;
+        // We now expect 'createdBy' (the Principal's ID) from the frontend
+        const { name, email, dept, password, createdBy } = req.body;
+
+        if (!createdBy) {
+            return res.status(400).json({ error: "Principal ID (createdBy) is required" });
+        }
+
         const exists = await Coordinator.findOne({ email });
         if (exists) return res.status(400).json({ error: "Coordinator already exists" });
 
-        const newCoord = new Coordinator({ name, email, dept, password });
+        const newCoord = new Coordinator({ 
+            name, 
+            email, 
+            dept, 
+            password, 
+            createdBy // Save the link to the Principal
+        });
+        
         await newCoord.save();
         res.status(201).json(newCoord);
     } catch (err) {
@@ -75,11 +89,13 @@ app.post('/add-coordinator', async (req, res) => {
     }
 });
 
-// Fetch all coordinators for the list view
-app.get('/coordinators', async (req, res) => {
+// Fetch only coordinators created by a SPECIFIC Principal
+app.get('/coordinators/:principalId', async (req, res) => {
     await connectToDB();
     try {
-        const list = await Coordinator.find().sort({ createdAt: -1 });
+        const { principalId } = req.params;
+        // Filter by the createdBy field
+        const list = await Coordinator.find({ createdBy: principalId }).sort({ createdAt: -1 });
         res.json(list);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -97,7 +113,6 @@ app.delete('/coordinator/:id', async (req, res) => {
     }
 });
 
-// Health check route
 app.get('/', (req, res) => res.send("Placemate Unified API is Live!"));
 
 module.exports = app;
