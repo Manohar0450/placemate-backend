@@ -210,8 +210,9 @@ app.post('/student/login', async (req, res) => {
     }
 });
 
-// --- 5. APPLICATION ROUTES (NEW) ---
+// --- 5. APPLICATION ROUTES ---
 
+// Student: Submit Application
 app.post('/apply-job', async (req, res) => {
     await connectToDB();
     try {
@@ -231,12 +232,42 @@ app.post('/apply-job', async (req, res) => {
     }
 });
 
+// Student: Get personal applications
 app.get('/my-applications/:rollId', async (req, res) => {
     await connectToDB();
     try {
         const list = await mongoose.connection.collection('job_applications')
             .find({ rollId: req.params.rollId })
             .sort({ appliedAt: -1 }).toArray();
+        res.json(list);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Coordinator: Get applicants for a SPECIFIC company
+app.get('/applications/by-company/:companyName', async (req, res) => {
+    await connectToDB();
+    try {
+        const { companyName } = req.params;
+        const list = await mongoose.connection.collection('job_applications')
+            .find({ companyName: companyName })
+            .sort({ appliedAt: -1 })
+            .toArray();
+        res.json(list);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Coordinator: Get ALL student applications
+app.get('/coordinator/applications', async (req, res) => {
+    await connectToDB();
+    try {
+        const list = await mongoose.connection.collection('job_applications')
+            .find()
+            .sort({ appliedAt: -1 })
+            .toArray();
         res.json(list);
     } catch (err) {
         res.status(500).json({ error: err.message });
