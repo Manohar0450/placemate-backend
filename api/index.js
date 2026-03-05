@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
 
-// Import both models
+// Import models
 const Principal = require('../models/Principal');
 const Coordinator = require('../models/Coordinator');
 
@@ -57,12 +57,8 @@ app.post('/login', async (req, res) => {
     }
 });
 
-// --- 2. COORDINATOR ROUTES (Managed by Principal) ---
+// --- 2. COORDINATOR ROUTES ---
 
-/**
- * NEW: Coordinator Login Route
- * This was missing! Point your Flutter Coordinator Login here.
- */
 app.post('/coordinator/login', async (req, res) => {
     await connectToDB();
     try {
@@ -72,35 +68,22 @@ app.post('/coordinator/login', async (req, res) => {
         if (!coordinator || coordinator.password !== password) {
             return res.status(401).json({ error: "Invalid credentials" });
         }
-        
-        // Return the coordinator object containing _id
         res.status(200).json({ message: "Coordinator login success", coordinator });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-// Create a new coordinator LINKED to a Principal
 app.post('/add-coordinator', async (req, res) => {
     await connectToDB();
     try {
         const { name, email, dept, password, createdBy } = req.body;
-
-        if (!createdBy) {
-            return res.status(400).json({ error: "Principal ID (createdBy) is required" });
-        }
+        if (!createdBy) return res.status(400).json({ error: "Principal ID required" });
 
         const exists = await Coordinator.findOne({ email });
         if (exists) return res.status(400).json({ error: "Coordinator already exists" });
 
-        const newCoord = new Coordinator({ 
-            name, 
-            email, 
-            dept, 
-            password, 
-            createdBy 
-        });
-        
+        const newCoord = new Coordinator({ name, email, dept, password, createdBy });
         await newCoord.save();
         res.status(201).json(newCoord);
     } catch (err) {
@@ -108,19 +91,16 @@ app.post('/add-coordinator', async (req, res) => {
     }
 });
 
-// Fetch only coordinators created by a SPECIFIC Principal
 app.get('/coordinators/:principalId', async (req, res) => {
     await connectToDB();
     try {
-        const { principalId } = req.params;
-        const list = await Coordinator.find({ createdBy: principalId }).sort({ createdAt: -1 });
+        const list = await Coordinator.find({ createdBy: req.params.principalId }).sort({ createdAt: -1 });
         res.json(list);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-// Delete a coordinator
 app.delete('/coordinator/:id', async (req, res) => {
     await connectToDB();
     try {
@@ -130,6 +110,55 @@ app.delete('/coordinator/:id', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+
+// --- 3. PLACEMENT ROUTES (NEW) ---
+
+// Save a new placement
+app.post('/add-placement', async (req, res) => {
+    await connectToDB();
+    try {
+        const { company, role, lpa, stage, createdBy } = req.body;
+
+        if (!createdBy) {
+            return res.status(400).json({ error: "Coordinator ID (createdBy) is required" });
+        }
+
+        const newPlacement = {
+            company,
+            role,
+            lpa,
+            stage,
+            createdBy, // Coordinator ID
+            createdAt: new Date()
+        };
+
+        // Saving to 'placements' collection directly
+        const result = await mongoose.connection.collection('placements').insertOne(newPlacement);
+        
+        res.status(201).json({ 
+            message: "Placement added successfully", 
+            placementId: result.insertedId 
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Get all placements (sorted by newest)
+app.get('/all-placements', async (req, res) => {
+    await connectToDB();
+    try {
+        const list = await mongoose.connection.collection('placements')
+            .find()
+            .sort({ createdAt: -1 })
+            .toArray();
+        res.json(list);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// --- 4. BASE ROUTES ---
 
 app.get('/', (req, res) => res.send("Placemate Unified API is Live!"));
 
