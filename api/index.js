@@ -138,7 +138,6 @@ app.get('/all-placements', async (req, res) => {
 
 // --- 4. STUDENT ROUTES ---
 
-// Create Student Account
 app.post('/add-student', async (req, res) => {
     await connectToDB();
     try {
@@ -151,17 +150,7 @@ app.post('/add-student', async (req, res) => {
         const emailExists = await mongoose.connection.collection('students').findOne({ email });
         if (emailExists) return res.status(400).json({ error: "Email already registered" });
 
-        const newStudent = {
-            name,
-            email,
-            dept,
-            rollId,
-            risk,
-            password,
-            createdBy, 
-            createdAt: new Date()
-        };
-
+        const newStudent = { name, email, dept, rollId, risk, password, createdBy, createdAt: new Date() };
         await mongoose.connection.collection('students').insertOne(newStudent);
         res.status(201).json({ message: "Student registered successfully" });
     } catch (err) {
@@ -169,21 +158,18 @@ app.post('/add-student', async (req, res) => {
     }
 });
 
-// Fetch Students by Coordinator ID
 app.get('/students/:coordinatorId', async (req, res) => {
     await connectToDB();
     try {
         const list = await mongoose.connection.collection('students')
             .find({ createdBy: req.params.coordinatorId })
-            .sort({ name: 1 })
-            .toArray();
+            .sort({ name: 1 }).toArray();
         res.json(list);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-// Update Risk Level
 app.patch('/student/risk', async (req, res) => {
     await connectToDB();
     try {
@@ -199,7 +185,6 @@ app.patch('/student/risk', async (req, res) => {
     }
 });
 
-// Delete Student Record
 app.delete('/student/:rollId', async (req, res) => {
     await connectToDB();
     try {
@@ -211,13 +196,11 @@ app.delete('/student/:rollId', async (req, res) => {
     }
 });
 
-// Student Login
 app.post('/student/login', async (req, res) => {
     await connectToDB();
     try {
         const { rollId, password } = req.body;
         const student = await mongoose.connection.collection('students').findOne({ rollId });
-        
         if (!student || student.password !== password) {
             return res.status(401).json({ error: "Invalid ID or Password" });
         }
@@ -227,8 +210,41 @@ app.post('/student/login', async (req, res) => {
     }
 });
 
-// --- 5. BASE ROUTES ---
+// --- 5. APPLICATION ROUTES (NEW) ---
 
-app.get('/', (req, res) => res.send("Placemate Unified API is Live!ehich is created by Manohar Nallamsetty"));
+app.post('/apply-job', async (req, res) => {
+    await connectToDB();
+    try {
+        const { rollId, studentName, companyName, role } = req.body;
+        const application = {
+            rollId,
+            studentName,
+            companyName,
+            role,
+            status: "Pending",
+            appliedAt: new Date()
+        };
+        await mongoose.connection.collection('job_applications').insertOne(application);
+        res.status(201).json({ message: "Application submitted successfully!" });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/my-applications/:rollId', async (req, res) => {
+    await connectToDB();
+    try {
+        const list = await mongoose.connection.collection('job_applications')
+            .find({ rollId: req.params.rollId })
+            .sort({ appliedAt: -1 }).toArray();
+        res.json(list);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// --- 6. BASE ROUTES ---
+
+app.get('/', (req, res) => res.send("Placemate Unified API is Live! Created by Manohar Nallamsetty"));
 
 module.exports = app;
