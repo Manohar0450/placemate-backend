@@ -2,6 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const nodemailer = require('nodemailer');
 const Principal = require('../models/Principal');
 const Coordinator = require('../models/Coordinator');
 
@@ -10,6 +11,15 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+
+// --- EMAIL CONFIGURATION ---
+const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+    }
+});
 
 // Connection caching for Vercel performance
 let isConnected = false;
@@ -41,14 +51,69 @@ app.post('/register', async (req, res) => {
     }
 });
 
+// PRINCIPAL LOGIN: Sends OTP to Email
 app.post('/login', async (req, res) => {
     await connectToDB();
     try {
         const { email, password } = req.body;
         const principal = await Principal.findOne({ email });
+        
         if (!principal || principal.password !== password) {
             return res.status(401).json({ error: "Invalid credentials" });
         }
+
+        // Generate 6-digit OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        
+        // Save OTP to DB with 5-minute expiry
+        principal.otp = otp;
+        principal.otpExpires = Date.now() + 300000; 
+        await principal.save();
+
+        // Send Email
+        const mailOptions = {
+            from: `"Placemate Admin" <${process.env.EMAIL_USER}>`,
+            to: principal.email,
+            subject: 'Login OTP - Placemate',
+            html: `
+                <div style="font-family: Arial, sans-serif; border: 1px solid #ddd; padding: 20px;">
+                    <h2 style="color: #4CAF50;">Placemate Login Verification</h2>
+                    <p>Hello Principal,</p>
+                    <p>Your One-Time Password (OTP) for logging into the Placemate Dashboard is:</p>
+                    <h1 style="background: #f4f4f4; padding: 10px; display: inline-block; letter-spacing: 5px;">${otp}</h1>
+                    <p>This OTP is valid for <b>5 minutes</b>. Please do not share this with anyone.</p>
+                </div>
+            `
+        };
+
+        await transporter.sendMail(mailOptions);
+        res.status(200).json({ message: "OTP sent to your registered email" });
+
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// PRINCIPAL OTP VERIFICATION
+app.post('/verify-otp', async (req, res) => {
+    await connectToDB();
+    try {
+        const { email, otp } = req.body;
+        const principal = await Principal.findOne({ 
+            email, 
+            otp, 
+            otpExpires: { $gt: Date.now() } 
+        });
+
+        if (!principal) {
+            return res.status(400).json({ error: "Invalid or expired OTP" });
+        }
+
+        // Clear OTP after use
+        principal.otp = undefined;
+        principal.otpExpires = undefined;
+        await principal.save();
+
         res.status(200).json({ message: "Login success", principal });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -106,7 +171,7 @@ app.delete('/coordinator/:id', async (req, res) => {
     }
 });
 
-// --- 2. PLACEMENT ROUTES (Update & Delete Integrated) ---
+// --- 2. PLACEMENT ROUTES ---
 
 app.post('/add-placement', async (req, res) => {
     await connectToDB();
