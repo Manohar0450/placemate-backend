@@ -234,7 +234,7 @@ app.delete('/delete-placement/:id', async (req, res) => {
     await connectToDB();
     try {
         const { id } = req.params;
-        const result = await mongoose.connection.collection('placements').deleteOne({
+        const { result } = await mongoose.connection.collection('placements').deleteOne({
             _id: new mongoose.Types.ObjectId(id)
         });
         if (result.deletedCount === 0) return res.status(404).json({ error: "Placement not found" });
@@ -292,7 +292,10 @@ app.patch('/student/risk', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
-// --- UPDATE PRINCIPAL PROFILE ---
+
+// --- NEW DYNAMIC PROFILE UPDATES ---
+
+// UPDATE PRINCIPAL PROFILE
 app.put('/update-principal/:id', async (req, res) => {
     await connectToDB();
     try {
@@ -302,7 +305,7 @@ app.put('/update-principal/:id', async (req, res) => {
         const updatedPrincipal = await Principal.findByIdAndUpdate(
             id,
             { name, phone, institution },
-            { new: true } // Returns the updated document
+            { new: true } 
         );
 
         if (!updatedPrincipal) {
@@ -314,6 +317,50 @@ app.put('/update-principal/:id', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+
+// UPDATE COORDINATOR PROFILE
+app.put('/update-coordinator/:id', async (req, res) => {
+    await connectToDB();
+    try {
+        const { id } = req.params;
+        const { name, phone, dept } = req.body;
+
+        const updatedCoordinator = await Coordinator.findByIdAndUpdate(
+            id,
+            { name, phone, dept },
+            { new: true }
+        );
+
+        if (!updatedCoordinator) return res.status(404).json({ error: "Coordinator not found" });
+
+        res.json({ message: "Profile updated successfully", coordinator: updatedCoordinator });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// UPDATE STUDENT PROFILE (Uses rollId as ID)
+app.put('/update-student/:rollId', async (req, res) => {
+    await connectToDB();
+    try {
+        const { rollId } = req.params;
+        const { name, phone, dept } = req.body;
+
+        const result = await mongoose.connection.collection('students').findOneAndUpdate(
+            { rollId: rollId },
+            { $set: { name, phone, dept, updatedAt: new Date() } },
+            { returnDocument: 'after' }
+        );
+
+        if (!result) return res.status(404).json({ error: "Student not found" });
+
+        res.json({ message: "Profile updated successfully", student: result.value || result });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// --- REST OF ROUTES ---
 
 app.delete('/student/:rollId', async (req, res) => {
     await connectToDB();
