@@ -51,21 +51,23 @@ app.post('/register', async (req, res) => {
 
         // Generate 6-digit OTP and 10-minute expiry
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        const otpExpires = Date.now() + 10 * 60 * 1000; 
+        const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes from now
 
         if (exists && !exists.isVerified) {
             // If user exists but NOT verified, update the existing record with new OTP
             exists.otp = otp;
             exists.otpExpires = otpExpires;
-            exists.name = name; // Update in case they want to change name
+            exists.name = name; 
             exists.password = password;
+            exists.phone = phone;
+            exists.institution = institution;
             await exists.save();
         } else {
             // Create new record if email is totally new
             const newPrincipal = new Principal({ 
                 name, email, password, phone, institution,
                 otp, 
-                otpExpires,
+                otpExpires, // Used for auto-deletion
                 isVerified: false 
             });
             await newPrincipal.save();
@@ -79,7 +81,7 @@ app.post('/register', async (req, res) => {
             html: `<h3>Welcome to Placemate, ${name}!</h3>
                    <p>Your verification code is: <b>${otp}</b></p>
                    <p>Please enter this code in the app to activate your account.</p>
-                   <p>This Otp Expires in 10 minutes.</p>
+                   <p>This Otp Expires in 10 minutes. <b>If not verified, your account will be deleted.</b></p>
                    <p>--->Manohar.</p>`
         };
 
@@ -97,13 +99,13 @@ app.post('/verify-otp', async (req, res) => {
         const { email, otp } = req.body;
         const principal = await Principal.findOne({ email });
 
-        if (!principal) return res.status(404).json({ error: "User not found" });
+        if (!principal) return res.status(404).json({ error: "User not found or registration expired" });
 
         // Check if OTP matches AND hasn't expired
         if (principal.otp === otp && principal.otpExpires > Date.now()) {
             principal.isVerified = true;
             principal.otp = null; 
-            principal.otpExpires = null; 
+            principal.otpExpires = null; // Important: Clear expiry so account is NOT deleted
             await principal.save();
             res.status(200).json({ message: "Email verified successfully!" });
         } else {

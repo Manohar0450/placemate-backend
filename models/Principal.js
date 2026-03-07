@@ -23,7 +23,16 @@ const PrincipalSchema = new mongoose.Schema({
     },
     otpExpires: { 
         type: Date 
+    },
+    isVerified: { 
+        type: Boolean, 
+        default: false 
     }
-}, { timestamps: true }); // Good practice to track when users were created
+}, { timestamps: true });
+
+// --- AUTO-DELETE INDEX ---
+// This index will automatically remove the document when 'otpExpires' is reached.
+// If 'otpExpires' is null (after verification), the document is safe.
+PrincipalSchema.index({ otpExpires: 1 }, { expireAfterSeconds: 0 });
 
 module.exports = mongoose.model('Principal', PrincipalSchema);
