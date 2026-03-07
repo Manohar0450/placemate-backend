@@ -2,6 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const nodemailer = require('nodemailer');
 const Principal = require('../models/Principal');
 const Coordinator = require('../models/Coordinator');
 
@@ -10,6 +11,15 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+
+// --- NODEMAILER CONFIGURATION ---
+const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+        user: process.env.EMAIL_USER, // Your Gmail address
+        pass: process.env.EMAIL_PASS  // Your Gmail App Password
+    }
+});
 
 // Connection caching for Vercel performance
 let isConnected = false;
@@ -26,29 +36,86 @@ const connectToDB = async () => {
 
 // --- 1. PRINCIPAL & COORDINATOR AUTH ROUTES ---
 
+// Updated Register: Generates OTP and sends Email
 app.post('/register', async (req, res) => {
     await connectToDB();
     try {
         const { name, email, password, phone, institution } = req.body;
+        
         const exists = await Principal.findOne({ email });
         if (exists) return res.status(400).json({ error: "Principal already exists" });
 
-        const newPrincipal = new Principal({ name, email, password, phone, institution });
+        // Generate 6-digit OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+        const newPrincipal = new Principal({ 
+            name, 
+            email, 
+            password, 
+            phone, 
+            institution,
+            otp, // Store OTP in DB
+            isVerified: false // Default to false
+        });
+
         await newPrincipal.save();
-        res.status(201).json({ message: "Principal registered successfully" });
+
+        // Send OTP via Email
+        const mailOptions = {
+            from: process.env.EMAIL_USER,
+            to: email,
+            subject: 'Verify your Placemate Account',
+            html: `<h3>Welcome to Placemate, ${name}!</h3>
+                   <p>Your verification code is: <b>${otp}</b></p>
+                   <p>Please enter this code in the app to activate your account.</p>`
+        };
+
+        await transporter.sendMail(mailOptions);
+
+        res.status(201).json({ message: "OTP sent to email. Please verify." });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
+// New Route: Verify OTP
+app.post('/verify-otp', async (req, res) => {
+    await connectToDB();
+    try {
+        const { email, otp } = req.body;
+        const principal = await Principal.findOne({ email });
+
+        if (!principal) return res.status(404).json({ error: "User not found" });
+
+        if (principal.otp === otp) {
+            principal.isVerified = true;
+            principal.otp = null; // Clear OTP after verification
+            await principal.save();
+            res.status(200).json({ message: "Email verified successfully!" });
+        } else {
+            res.status(400).json({ error: "Invalid or expired OTP" });
+        }
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Updated Login: Checks for verification
 app.post('/login', async (req, res) => {
     await connectToDB();
     try {
         const { email, password } = req.body;
         const principal = await Principal.findOne({ email });
+        
         if (!principal || principal.password !== password) {
             return res.status(401).json({ error: "Invalid credentials" });
         }
+
+        // Check if verified
+        if (principal.isVerified === false) {
+            return res.status(403).json({ error: "Please verify your email before logging in." });
+        }
+
         res.status(200).json({ message: "Login success", principal });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -106,7 +173,7 @@ app.delete('/coordinator/:id', async (req, res) => {
     }
 });
 
-// --- 2. PLACEMENT ROUTES (Update & Delete Integrated) ---
+// --- 2. PLACEMENT ROUTES ---
 
 app.post('/add-placement', async (req, res) => {
     await connectToDB();
