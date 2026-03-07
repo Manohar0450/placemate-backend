@@ -36,29 +36,40 @@ const connectToDB = async () => {
 
 // --- 1. PRINCIPAL & COORDINATOR AUTH ROUTES ---
 
-// Updated Register: Generates OTP and sends Email
+// Updated Register: Now handles OTP Expiry and re-sending for unverified accounts
 app.post('/register', async (req, res) => {
     await connectToDB();
     try {
         const { name, email, password, phone, institution } = req.body;
         
         const exists = await Principal.findOne({ email });
-        if (exists) return res.status(400).json({ error: "Principal already exists" });
+        
+        // Logic: If user exists AND is already verified, block registration
+        if (exists && exists.isVerified) {
+            return res.status(400).json({ error: "Principal already exists" });
+        }
 
-        // Generate 6-digit OTP
+        // Generate 6-digit OTP and 10-minute expiry
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const otpExpires = Date.now() + 10 * 60 * 1000; 
 
-        const newPrincipal = new Principal({ 
-            name, 
-            email, 
-            password, 
-            phone, 
-            institution,
-            otp, // Store OTP in DB
-            isVerified: false // Default to false
-        });
-
-        await newPrincipal.save();
+        if (exists && !exists.isVerified) {
+            // If user exists but NOT verified, update the existing record with new OTP
+            exists.otp = otp;
+            exists.otpExpires = otpExpires;
+            exists.name = name; // Update in case they want to change name
+            exists.password = password;
+            await exists.save();
+        } else {
+            // Create new record if email is totally new
+            const newPrincipal = new Principal({ 
+                name, email, password, phone, institution,
+                otp, 
+                otpExpires,
+                isVerified: false 
+            });
+            await newPrincipal.save();
+        }
 
         // Send OTP via Email
         const mailOptions = {
@@ -68,19 +79,18 @@ app.post('/register', async (req, res) => {
             html: `<h3>Welcome to Placemate, ${name}!</h3>
                    <p>Your verification code is: <b>${otp}</b></p>
                    <p>Please enter this code in the app to activate your account.</p>
-                    <p>This Otp Expires in 10 minutes.</p>
-                     <p>                                                              --->Manohar.</p>`
+                   <p>This Otp Expires in 10 minutes.</p>
+                   <p>--->Manohar.</p>`
         };
 
         await transporter.sendMail(mailOptions);
-
         res.status(201).json({ message: "OTP sent to email. Please verify." });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-// New Route: Verify OTP
+// New Route: Verify OTP with Expiry check
 app.post('/verify-otp', async (req, res) => {
     await connectToDB();
     try {
@@ -89,9 +99,11 @@ app.post('/verify-otp', async (req, res) => {
 
         if (!principal) return res.status(404).json({ error: "User not found" });
 
-        if (principal.otp === otp) {
+        // Check if OTP matches AND hasn't expired
+        if (principal.otp === otp && principal.otpExpires > Date.now()) {
             principal.isVerified = true;
-            principal.otp = null; // Clear OTP after verification
+            principal.otp = null; 
+            principal.otpExpires = null; 
             await principal.save();
             res.status(200).json({ message: "Email verified successfully!" });
         } else {
@@ -113,7 +125,6 @@ app.post('/login', async (req, res) => {
             return res.status(401).json({ error: "Invalid credentials" });
         }
 
-        // Check if verified
         if (principal.isVerified === false) {
             return res.status(403).json({ error: "Please verify your email before logging in." });
         }
