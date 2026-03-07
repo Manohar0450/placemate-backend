@@ -67,7 +67,9 @@ app.post('/register', async (req, res) => {
             subject: 'Verify your Placemate Account',
             html: `<h3>Welcome to Placemate, ${name}!</h3>
                    <p>Your verification code is: <b>${otp}</b></p>
-                   <p>Please enter this code in the app to activate your account.</p>`
+                   <p>Please enter this code in the app to activate your account.</p>
+                    <p>This Otp Expires in 10 minutes.</p>
+                     <p>                                                              --->Manohar.</p>`
         };
 
         await transporter.sendMail(mailOptions);
