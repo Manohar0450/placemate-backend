@@ -292,6 +292,28 @@ app.patch('/student/risk', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+// --- UPDATE PRINCIPAL PROFILE ---
+app.put('/update-principal/:id', async (req, res) => {
+    await connectToDB();
+    try {
+        const { id } = req.params;
+        const { name, phone, institution } = req.body;
+
+        const updatedPrincipal = await Principal.findByIdAndUpdate(
+            id,
+            { name, phone, institution },
+            { new: true } // Returns the updated document
+        );
+
+        if (!updatedPrincipal) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        res.json({ message: "Profile updated successfully", principal: updatedPrincipal });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
 
 app.delete('/student/:rollId', async (req, res) => {
     await connectToDB();
