@@ -2,8 +2,6 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
-
-// Import models
 const Principal = require('../models/Principal');
 const Coordinator = require('../models/Coordinator');
 
@@ -26,7 +24,7 @@ const connectToDB = async () => {
     }
 };
 
-// --- 1. PRINCIPAL ROUTES ---
+// --- 1. PRINCIPAL & COORDINATOR AUTH ROUTES ---
 
 app.post('/register', async (req, res) => {
     await connectToDB();
@@ -56,8 +54,6 @@ app.post('/login', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
-
-// --- 2. COORDINATOR ROUTES ---
 
 app.post('/coordinator/login', async (req, res) => {
     await connectToDB();
@@ -110,7 +106,7 @@ app.delete('/coordinator/:id', async (req, res) => {
     }
 });
 
-// --- 3. PLACEMENT ROUTES ---
+// --- 2. PLACEMENT ROUTES (Update & Delete Integrated) ---
 
 app.post('/add-placement', async (req, res) => {
     await connectToDB();
@@ -136,7 +132,37 @@ app.get('/all-placements', async (req, res) => {
     }
 });
 
-// --- 4. STUDENT ROUTES ---
+app.put('/update-placement/:id', async (req, res) => {
+    await connectToDB();
+    try {
+        const { id } = req.params;
+        const { company, role, lpa, stage } = req.body;
+        const result = await mongoose.connection.collection('placements').updateOne(
+            { _id: new mongoose.Types.ObjectId(id) },
+            { $set: { company, role, lpa, stage, updatedAt: new Date() } }
+        );
+        if (result.matchedCount === 0) return res.status(404).json({ error: "Placement not found" });
+        res.json({ message: "Placement updated successfully" });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.delete('/delete-placement/:id', async (req, res) => {
+    await connectToDB();
+    try {
+        const { id } = req.params;
+        const result = await mongoose.connection.collection('placements').deleteOne({
+            _id: new mongoose.Types.ObjectId(id)
+        });
+        if (result.deletedCount === 0) return res.status(404).json({ error: "Placement not found" });
+        res.json({ message: "Placement deleted successfully" });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// --- 3. STUDENT ROUTES ---
 
 app.post('/add-student', async (req, res) => {
     await connectToDB();
@@ -210,9 +236,8 @@ app.post('/student/login', async (req, res) => {
     }
 });
 
-// --- 5. APPLICATION ROUTES ---
+// --- 4. JOB APPLICATION ROUTES ---
 
-// Student: Submit Application
 app.post('/apply-job', async (req, res) => {
     await connectToDB();
     try {
@@ -232,7 +257,6 @@ app.post('/apply-job', async (req, res) => {
     }
 });
 
-// Student: Get personal applications
 app.get('/my-applications/:rollId', async (req, res) => {
     await connectToDB();
     try {
@@ -245,37 +269,18 @@ app.get('/my-applications/:rollId', async (req, res) => {
     }
 });
 
-// Coordinator: Get applicants for a SPECIFIC company
-app.get('/applications/by-company/:companyName', async (req, res) => {
-    await connectToDB();
-    try {
-        const { companyName } = req.params;
-        const list = await mongoose.connection.collection('job_applications')
-            .find({ companyName: companyName })
-            .sort({ appliedAt: -1 })
-            .toArray();
-        res.json(list);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// Coordinator: Get ALL student applications
 app.get('/coordinator/applications', async (req, res) => {
     await connectToDB();
     try {
         const list = await mongoose.connection.collection('job_applications')
-            .find()
-            .sort({ appliedAt: -1 })
-            .toArray();
+            .find().sort({ appliedAt: -1 }).toArray();
         res.json(list);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-// --- 6. BASE ROUTES ---
-
+// --- 5. BASE ROUTES ---
 app.get('/', (req, res) => res.send("Placemate Unified API is Live! Created by Manohar Nallamsetty"));
 
 module.exports = app;
