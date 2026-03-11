@@ -319,25 +319,36 @@ app.put('/update-principal/:id', async (req, res) => {
 });
 
 // UPDATE COORDINATOR PROFILE
+// ... (keep all your existing imports and setup)
+
+// UPDATED: COORDINATOR PROFILE UPDATE (Handles name, email, dept, password)
 app.put('/update-coordinator/:id', async (req, res) => {
     await connectToDB();
     try {
         const { id } = req.params;
-        const { name, phone, dept } = req.body;
+        const { name, email, dept, password } = req.body;
+
+        // Check if email is being changed and if it's already taken by someone else
+        if (email) {
+            const emailExists = await Coordinator.findOne({ email, _id: { $ne: id } });
+            if (emailExists) return res.status(400).json({ error: "Email already in use by another coordinator" });
+        }
 
         const updatedCoordinator = await Coordinator.findByIdAndUpdate(
             id,
-            { name, phone, dept },
+            { name, email, dept, password }, // Added email and password to update fields
             { new: true }
         );
 
         if (!updatedCoordinator) return res.status(404).json({ error: "Coordinator not found" });
 
-        res.json({ message: "Profile updated successfully", coordinator: updatedCoordinator });
+        res.json({ message: "Coordinator updated successfully", coordinator: updatedCoordinator });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
+
+// ... (keep all other existing routes exactly as they are)
 
 // UPDATE STUDENT PROFILE (Uses rollId as ID)
 app.put('/update-student/:rollId', async (req, res) => {
