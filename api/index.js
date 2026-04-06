@@ -35,31 +35,17 @@ const connectToDB = async () => {
 };
 
 // ─── NOTIFICATION HELPER ─────────────────────────────────────
-/**
- * Push a notification to one or many userIds.
- * @param {string|string[]} userIds
- * @param {string} type  welcome|application|placement|security|risk|info
- * @param {string} title
- * @param {string} message
- */
 const pushNotification = async (userIds, type, title, message) => {
     const ids = Array.isArray(userIds) ? userIds : [userIds];
     if (!ids.length) return;
-
     const docs = ids.map(userId => ({
-        userId,
-        type,
-        title,
-        message,
-        isRead: false,
-        createdAt: new Date(),
+        userId, type, title, message, isRead: false, createdAt: new Date(),
     }));
-
     await mongoose.connection.collection('notifications').insertMany(docs);
 };
 
 // ─────────────────────────────────────────────────────────────
-// 1. PRINCIPAL & COORDINATOR AUTH ROUTES
+// 1. AUTH ROUTES
 // ─────────────────────────────────────────────────────────────
 
 app.post('/register', async (req, res) => {
@@ -68,38 +54,29 @@ app.post('/register', async (req, res) => {
         const { name, email, password, phone, institution } = req.body;
 
         const exists = await Principal.findOne({ email });
-        if (exists && exists.isVerified) {
+        if (exists && exists.isVerified)
             return res.status(400).json({ error: "Principal with this email already exists" });
-        }
 
         const institutionExists = await Principal.findOne({
             institution: { $regex: new RegExp(`^${institution}$`, 'i') },
             isVerified: true
         });
-        if (institutionExists) {
+        if (institutionExists)
             return res.status(400).json({ error: "This institution is already registered." });
-        }
 
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
         const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
 
         if (exists && !exists.isVerified) {
-            exists.otp = otp;
-            exists.otpExpires = otpExpires;
-            exists.name = name;
-            exists.password = password;
-            exists.phone = phone;
-            exists.institution = institution;
+            exists.otp = otp; exists.otpExpires = otpExpires;
+            exists.name = name; exists.password = password;
+            exists.phone = phone; exists.institution = institution;
             await exists.save();
         } else {
-            const newPrincipal = new Principal({
-                name, email, password, phone, institution,
-                otp, otpExpires, isVerified: false
-            });
-            await newPrincipal.save();
+            await new Principal({ name, email, password, phone, institution, otp, otpExpires, isVerified: false }).save();
         }
 
-        const mailOptions = {
+        await transporter.sendMail({
             from: process.env.EMAIL_USER,
             to: email,
             subject: 'Verify your Placemate Account',
@@ -107,9 +84,7 @@ app.post('/register', async (req, res) => {
                    <p>Your verification code for <b>${institution}</b> is: <b>${otp}</b></p>
                    <p>This code expires in 10 minutes.</p>
                    <p>---> Manohar.</p>`
-        };
-
-        await transporter.sendMail(mailOptions);
+        });
         res.status(201).json({ message: "OTP sent to email. Please verify." });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -121,7 +96,6 @@ app.post('/verify-otp', async (req, res) => {
     try {
         const { email, otp } = req.body;
         const principal = await Principal.findOne({ email });
-
         if (!principal) return res.status(404).json({ error: "User not found" });
 
         if (principal.otp === otp && principal.otpExpires > Date.now()) {
@@ -130,20 +104,14 @@ app.post('/verify-otp', async (req, res) => {
             principal.otpExpires = null;
             await principal.save();
 
-            // 🔔 Welcome notification for principal
-            await pushNotification(
-                principal._id.toString(),
-                'welcome',
+            await pushNotification(principal._id.toString(), 'welcome',
                 'Account Successfully Created',
                 `Welcome, ${principal.name}! Your principal account for ${principal.institution} is now active.`
             );
-            await pushNotification(
-                principal._id.toString(),
-                'security',
+            await pushNotification(principal._id.toString(), 'security',
                 'Security Update',
                 'We recommend enabling Two-Factor Authentication (2FA) in your account settings.'
             );
-
             res.status(200).json({ message: "Email verified successfully!" });
         } else {
             res.status(400).json({ error: "Invalid or expired OTP" });
@@ -153,34 +121,81 @@ app.post('/verify-otp', async (req, res) => {
     }
 });
 
+// Principal login
 app.post('/login', async (req, res) => {
     await connectToDB();
     try {
         const { email, password } = req.body;
         const principal = await Principal.findOne({ email });
-
-        if (!principal || principal.password !== password) {
+        if (!principal || principal.password !== password)
             return res.status(401).json({ error: "Invalid credentials" });
-        }
-        if (!principal.isVerified) {
+        if (!principal.isVerified)
             return res.status(403).json({ error: "Please verify your email before logging in." });
-        }
-
         res.status(200).json({ message: "Login success", principal });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
+// Coordinator login
 app.post('/coordinator/login', async (req, res) => {
     await connectToDB();
     try {
         const { email, password } = req.body;
         const coordinator = await Coordinator.findOne({ email });
-        if (!coordinator || coordinator.password !== password) {
+        if (!coordinator || coordinator.password !== password)
             return res.status(401).json({ error: "Invalid credentials" });
-        }
         res.status(200).json({ message: "Coordinator login success", coordinator });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ─────────────────────────────────────────────────────────────
+// ✅ STUDENT LOGIN — supports rollId+password OR email+password
+// ─────────────────────────────────────────────────────────────
+app.post('/student/login', async (req, res) => {
+    await connectToDB();
+    try {
+        const { rollId, email, password } = req.body;
+
+        if (!password)
+            return res.status(400).json({ error: "Password is required" });
+
+        if (!rollId && !email)
+            return res.status(400).json({ error: "Roll ID or email is required" });
+
+        // Find student by rollId first, fall back to email
+        let student = null;
+        if (rollId) {
+            student = await mongoose.connection.collection('students')
+                .findOne({ rollId: rollId.toString().trim() });
+        }
+        if (!student && email) {
+            student = await mongoose.connection.collection('students')
+                .findOne({ email: email.toString().trim().toLowerCase() });
+        }
+
+        if (!student)
+            return res.status(404).json({ error: "Student not found. Check your Roll ID or email." });
+
+        if (student.password !== password)
+            return res.status(401).json({ error: "Invalid password" });
+
+        // Return full student object (Flutter stores this in session)
+        res.status(200).json({
+            message: "Student login success",
+            student: {
+                _id: student._id.toString(),
+                name: student.name,
+                email: student.email,
+                rollId: student.rollId,
+                dept: student.dept,
+                risk: student.risk ?? "Low",
+                phone: student.phone ?? "",
+                createdBy: student.createdBy ?? "",
+            }
+        });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -198,14 +213,10 @@ app.post('/add-coordinator', async (req, res) => {
         const newCoord = new Coordinator({ name, email, dept, password, createdBy });
         await newCoord.save();
 
-        // 🔔 Welcome notification to coordinator
-        await pushNotification(
-            newCoord._id.toString(),
-            'welcome',
+        await pushNotification(newCoord._id.toString(), 'welcome',
             'Welcome to Placemate!',
             `Your coordinator account has been created for the ${dept} department. You can now manage students and placements.`
         );
-
         res.status(201).json(newCoord);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -240,25 +251,20 @@ app.post('/add-placement', async (req, res) => {
     await connectToDB();
     try {
         const { company, role, lpa, stage, createdBy } = req.body;
-        const newPlacement = { company, role, lpa, stage, createdBy, createdAt: new Date() };
-        const result = await mongoose.connection.collection('placements').insertOne(newPlacement);
+        await mongoose.connection.collection('placements')
+            .insertOne({ company, role, lpa, stage, createdBy, createdAt: new Date() });
 
-        // 🔔 Notify ALL students that a new placement is available
-        // Find all students under this coordinator's institution
+        // 🔔 Notify all students under this coordinator
         const allStudents = await mongoose.connection.collection('students')
-            .find({ createdBy })
-            .toArray();
-
+            .find({ createdBy }).toArray();
         if (allStudents.length > 0) {
-            const studentIds = allStudents.map(s => s._id.toString());
             await pushNotification(
-                studentIds,
+                allStudents.map(s => s._id.toString()),
                 'placement',
                 `New Placement: ${company}`,
                 `${company} is hiring for ${role} at ${lpa}. Check the Placements tab to apply!`
             );
         }
-
         res.status(201).json({ message: "Placement added successfully" });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -279,10 +285,9 @@ app.get('/all-placements', async (req, res) => {
 app.put('/update-placement/:id', async (req, res) => {
     await connectToDB();
     try {
-        const { id } = req.params;
         const { company, role, lpa, stage } = req.body;
         await mongoose.connection.collection('placements').updateOne(
-            { _id: new mongoose.Types.ObjectId(id) },
+            { _id: new mongoose.Types.ObjectId(req.params.id) },
             { $set: { company, role, lpa, stage, updatedAt: new Date() } }
         );
         res.json({ message: "Placement updated successfully" });
@@ -314,17 +319,15 @@ app.post('/add-student', async (req, res) => {
         const idExists = await mongoose.connection.collection('students').findOne({ rollId });
         if (idExists) return res.status(400).json({ error: "Roll ID already exists" });
 
-        const newStudent = { name, email, dept, rollId, risk, password, createdBy, createdAt: new Date() };
-        const result = await mongoose.connection.collection('students').insertOne(newStudent);
+        const result = await mongoose.connection.collection('students')
+            .insertOne({ name, email, dept, rollId, risk, password, createdBy, createdAt: new Date() });
 
-        // 🔔 Welcome notification to student
+        // 🔔 Welcome notification — keyed by MongoDB _id (matches student login response)
         await pushNotification(
-            result.insertedId.toString(),
-            'welcome',
+            result.insertedId.toString(), 'welcome',
             'Welcome to Placemate!',
             `Hi ${name}, your student account has been created. You can now browse and apply for placements.`
         );
-
         res.status(201).json({ message: "Student registered successfully" });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -389,35 +392,26 @@ app.put('/update-student/:rollId', async (req, res) => {
 app.post('/apply-job', async (req, res) => {
     await connectToDB();
     try {
-        const { rollId, company, role, placementId } = req.body;
-        const application = { ...req.body, status: "Pending", appliedAt: new Date() };
-        await mongoose.connection.collection('job_applications').insertOne(application);
+        const { rollId, company, role } = req.body;
+        await mongoose.connection.collection('job_applications')
+            .insertOne({ ...req.body, status: "Pending", appliedAt: new Date() });
 
-        // Find the student to get their coordinatorId and name
-        const student = await mongoose.connection.collection('students')
-            .findOne({ rollId });
-
+        const student = await mongoose.connection.collection('students').findOne({ rollId });
         if (student) {
-            // 🔔 Notify the coordinator that a student applied
             const coordinator = await Coordinator.findById(student.createdBy);
             if (coordinator) {
-                await pushNotification(
-                    coordinator._id.toString(),
-                    'application',
+                // 🔔 Notify coordinator
+                await pushNotification(coordinator._id.toString(), 'application',
                     `${student.name} Applied`,
                     `${student.name} (${rollId}) has applied for ${role} at ${company}.`
                 );
-
-                // 🔔 Also notify the principal
-                await pushNotification(
-                    coordinator.createdBy.toString(),
-                    'application',
+                // 🔔 Notify principal
+                await pushNotification(coordinator.createdBy.toString(), 'application',
                     `New Application — ${company}`,
                     `${student.name} (${student.dept}) applied for ${role} at ${company}.`
                 );
             }
         }
-
         res.status(201).json({ message: "Application submitted" });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -439,7 +433,6 @@ app.get('/my-applications/:rollId', async (req, res) => {
 // 6. NOTIFICATION ROUTES
 // ─────────────────────────────────────────────────────────────
 
-// GET all notifications for a user (newest first)
 app.get('/notifications/:userId', async (req, res) => {
     await connectToDB();
     try {
@@ -454,7 +447,6 @@ app.get('/notifications/:userId', async (req, res) => {
     }
 });
 
-// GET unread count only
 app.get('/notifications/:userId/unread-count', async (req, res) => {
     await connectToDB();
     try {
@@ -466,7 +458,6 @@ app.get('/notifications/:userId/unread-count', async (req, res) => {
     }
 });
 
-// PATCH mark all as read
 app.patch('/notifications/:userId/mark-read', async (req, res) => {
     await connectToDB();
     try {
@@ -480,13 +471,11 @@ app.patch('/notifications/:userId/mark-read', async (req, res) => {
     }
 });
 
-// DELETE clear all notifications for user
 app.delete('/notifications/:userId/clear', async (req, res) => {
     await connectToDB();
     try {
-        await mongoose.connection.collection('notifications').deleteMany(
-            { userId: req.params.userId }
-        );
+        await mongoose.connection.collection('notifications')
+            .deleteMany({ userId: req.params.userId });
         res.json({ message: "All notifications cleared" });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -494,7 +483,7 @@ app.delete('/notifications/:userId/clear', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────
-// RISK PATCH ROUTE (used by coordinator)
+// RISK PATCH ROUTE
 // ─────────────────────────────────────────────────────────────
 app.patch('/student/risk', async (req, res) => {
     await connectToDB();
@@ -504,21 +493,15 @@ app.patch('/student/risk', async (req, res) => {
             { rollId },
             { $set: { risk: newRisk, updatedAt: new Date() } }
         );
-
-        // 🔔 Notify student if marked High Risk
         if (newRisk === 'High') {
-            const student = await mongoose.connection.collection('students')
-                .findOne({ rollId });
+            const student = await mongoose.connection.collection('students').findOne({ rollId });
             if (student) {
-                await pushNotification(
-                    student._id.toString(),
-                    'risk',
+                await pushNotification(student._id.toString(), 'risk',
                     'Risk Level Updated',
                     'Your placement risk level has been marked as High. Please speak to your coordinator.'
                 );
             }
         }
-
         res.json({ message: "Risk updated" });
     } catch (err) {
         res.status(500).json({ error: err.message });
