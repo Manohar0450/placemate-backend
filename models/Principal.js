@@ -12,12 +12,12 @@ const PrincipalSchema = new mongoose.Schema({
     },
     password: { 
         type: String, 
-        required: true 
+        required:true 
     },
     institution: { 
         type: String 
     },
-    // --- NEW FIELDS FOR OTP SYSTEM ---
+    // --- NEW FIELDS FOR kjsnljdnkcOTP SYSTEM ---
     otp: { 
         type: String 
     },
